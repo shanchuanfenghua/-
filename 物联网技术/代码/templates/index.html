@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>IoT 实时监控大屏</title>
+    <script src="https://cdn.bootcdn.net/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="https://cdn.bootcdn.net/ajax/libs/echarts/5.4.3/echarts.min.js"></script>
+    <style>
+        body { background: #0b0f1a; color: #fff; font-family: sans-serif; margin: 0; text-align: center; }
+        .header { background: #161b29; padding: 15px; border-bottom: 2px solid #1890ff; margin-bottom: 20px; }
+        .container { display: flex; justify-content: center; gap: 20px; padding: 0 20px; }
+        .card { background: #1c2233; padding: 25px; border-radius: 10px; min-width: 180px; border: 1px solid #1890ff; }
+        .value { font-size: 45px; font-weight: bold; color: #00eaff; margin: 10px 0; }
+        #chart { width: 90%; height: 400px; margin: 30px auto; background: #1c2233; border-radius: 10px; padding: 10px; }
+    </style>
+</head>
+<body>
+    <div class="header"><h1>物联网实时监控大屏</h1></div>
+    <div class="container">
+        <div class="card"><h3>温度</h3><div id="temp-val" class="value">--</div><span>°C</span></div>
+        <div class="card"><h3>湿度</h3><div id="hum-val" class="value">--</div><span>%</span></div>
+    </div>
+    <div id="chart"></div>
+
+    <script>
+        console.log("前端脚本已启动...");
+
+        // 1. 初始化 ECharts
+        const myChart = echarts.init(document.getElementById('chart'), 'dark');
+        let dataList = [], timeList = [];
+        const option = {
+            tooltip: { trigger: 'axis' },
+            xAxis: { type: 'category', data: timeList },
+            yAxis: { type: 'value', min: 0, max: 100 },
+            series: [{ name: '温度', type: 'line', smooth: true, data: dataList, areaStyle: { opacity: 0.2 } }]
+        };
+        myChart.setOption(option);
+
+        // 2. 显式连接到后端 Socket.IO 服务（确保与 Flask 运行的地址端口一致）
+        const socket = io('http://127.0.0.1:5000', {
+            transports: ['websocket', 'polling'],
+            upgrade: true
+        });
+
+        // 3. 连接成功时的处理
+        socket.on('connect', () => {
+            console.log("WebSocket 已连接！ID:", socket.id);
+            console.log("当前传输协议:", socket.io.engine.transport.name);
+        });
+
+        // 4. 【调试】全局监听所有事件，方便排查后端是否发送了其他名称的事件
+        socket.onAny((eventName, ...args) => {
+            console.log("【全局监听】收到事件:", eventName, args);
+        });
+
+        // 5. 核心数据接收与纠错
+        socket.on('update_data', (data) => {
+            console.log("成功拦截到信号:", data);
+
+            // 自动兼容 temperature 或 temp 字段名
+            let t = data.temperature || data.temp || 0;
+            let h = data.humidity || data.hum || 0;
+
+            // 更新 UI 数字
+            document.getElementById('temp-val').innerText = t;
+            document.getElementById('hum-val').innerText = h;
+
+            // 更新 ECharts
+            const now = new Date().toLocaleTimeString().replace(/^\D*/, '');
+            timeList.push(now);
+            dataList.push(t);
+            if (timeList.length > 15) { timeList.shift(); dataList.shift(); }
+            myChart.setOption({ xAxis: { data: timeList }, series: [{ data: dataList }] });
+        });
+
+        // 6. 连接错误处理
+        socket.on('connect_error', (err) => {
+            console.error("连接失败，请检查后端:", err);
+        });
+
+        // 7. 可选：断开重连提示
+        socket.on('disconnect', (reason) => {
+            console.warn("WebSocket 断开:", reason);
+        });
+    </script>
+</body>
+</html>
